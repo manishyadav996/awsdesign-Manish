@@ -1,41 +1,68 @@
-
-
-
-
 This Terraform script creates an infrastructure on AWS for hosting a microsite with static and dynamic components. The infrastructure includes a VPC, subnets, security groups, EC2 instances, an RDS instance, an ELB, an S3 bucket, a CloudFront distribution, and a Route53 record. I have distributed the architecture in app, web and database component placed in public and private subnets
 
+Services used: 
+AWS services:
+•	VPC (Virtual Private Cloud)
+•	EC2 (Elastic Compute Cloud)
+•	RDS (Relational Database Service)
+•	Security Group
+Resources:
+•	VPC
+•	VPC CIDR block
+•	Public Subnet
+•	Private Subnet
+•	Internet Gateway
+•	Route Table
+•	Route Table Association
+•	EC2
+•	Key Pair
+•	Security Group
+•	EC2 Instance
+•	RDS
+•	DB Instance
+•	DB Subnet Group
+•	DB Parameter Group
+•	DB Security Group
 
 Summary of architecture:
 
-•	AWS Provider: 1
-•	VPC: 1 (main)
-•	Subnets: 2 (public and private)
-•	Security Groups: 2 (public and private)
-•	EC2 Instances: 2 (web and app)
-•	RDS Instance: 1 (postgres)
-•	ELB: 1 (aws_elb.main)
-•	S3 Bucket: 1 (static)
-•	CloudFront Distribution: 1 (main)
-•	Route53 Zone: 1 (main)
-•	Route53 Record: 1 (main)
+Presentation tier: (Public subnet)
+•	AWS Elastic Load Balancer (ELB)
+•	AWS Security Group (to allow inbound traffic to the ELB)
+•	AWS Route 53 (to associate a domain name with the ELB)
+Application tier: (private subnet)
+•	AWS EC2 instance (to run the application)
+•	AWS Security Group (to allow inbound traffic to the EC2 instance)
+•	AWS IAM instance profile (to grant permissions to the EC2 instance to access other AWS services)
+•	AWS S3 bucket (to store application data)
+Data tier: (private subnet)
+•	AWS RDS instance (to host the database)
+•	AWS Security Group (to allow inbound traffic to the RDS instance)
+•	AWS Subnet Group (to specify the subnets in which the RDS instance should run)
+•	AWS DB Parameter Group (to configure the database settings)
 
 
 
 Architecture description in depth:
 
-•	I defined an AWS provider with the region "us-east-1" in my Terraform configuration. Then, I created a VPC with a CIDR block of "10.0.0.0/16" and a tag of "main". 
-•	Next, I created two subnets: one public with a CIDR block of "10.0.1.0/24", an availability zone of "us-east-1a", and a tag of "public"; and one private with a CIDR block of "10.0.2.0/24", an availability zone of "us-east-1b", and a tag of "private".
+•	First, I define the provider that I will be using in my code, which in this case is AWS. I set the region to be used based on a variable passed in.
 
-•	After that, I created two security groups: one for the public subnet that allowed incoming traffic on port 80 from any IP address, and one for the private subnet that allowed incoming traffic on port 5432 from the security group associated with the public subnet.
+•	Then, I create a VPC resource with a specified CIDR block and a Name tag. 
 
-•	Next, I created two EC2 instances: one in the public subnet with an Ubuntu AMI, a t2.micro instance type, and a user data script that installed Apache web server; and one in the private subnet with the same AMI and instance type, and a user data script that installed Docker.
+•	Next, I create subnets for the VPC. There are two types of subnets: public and private. I assign a VPC ID, a CIDR block, and an availability zone to each subnet. Public subnets have the option to map public IP addresses to instances launched in them. Each subnet also has a Name tag.
 
-•	I also created an RDS instance with 10GB of storage, the PostgreSQL engine version 11.4, a db.t2.micro instance class, a database name of "mydb", and a username and password of "admin" and "password" respectively. It used the default parameter group for PostgreSQL 11 and skipped the final snapshot. The RDS instance was associated with the private security group and a subnet group called "mydb-subnet-group". I tagged it with the name "mydb".
+•	After that, I create security groups for both public and private subnets. The public security group allows inbound traffic on port 80 and the private security group allows inbound traffic on port 5432 from instances associated with the public security group.
 
-•	I then created an Elastic Load Balancer with the name "my-elb" in the public subnet that listened on port 80 and performed a health check on the root URL path. It was associated with the public security group.
+•	Next, I create an EC2 instance resource with an AMI ID, instance type, and subnet ID. I assign a security group and a user data script to the instance. A root block device is also defined for the instance. In addition, I create a launch configuration resource that contains the same parameters as the EC2 instance resource.
 
-•	Additionally, I also created an S3 bucket called "manish-static-files" that had public read access and a website configuration that specified "index.html" as the index document and "404.html" as the error document.
+•	Then, I create an autoscaling group resource that is associated with the launch configuration. The autoscaling group has a desired capacity of 2 instances, with a minimum of 1 and a maximum of 3. It also has a health check that is based on EC2 instances. 
 
-•	Then i created a CloudFront distribution that used the S3 bucket as its origin, allowed GET, HEAD, and OPTIONS methods, and set a viewer protocol policy to redirect HTTP to HTTPS. It was enabled for IPv6 and used the default root object of "index.html". I also set up some geo restrictions that whitelisted the US, Canada, the UK, and Germany, and specified two domain names as aliases. 
+•	The autoscaling group spans across all public subnets.
 
-•	Finally, I created a Route53 zone for the "manish.com" domain and created an A record that pointed to the CloudFront distribution using an alias.
+•	Following that, I create an RDS instance resource with a DB instance class, engine, engine version. The RDS instance is associated with the private security group and a DB subnet group.
+
+•	After that, I create an ELB resource with a specified name, public subnets, and a security group. I set up a listener that listens on port 80 and has an HTTP protocol. The ELB also has a health check that checks the HTTP response from the instances.
+
+•	Then, I create an S3 bucket resource with a specified name and website properties. The bucket is set to be publicly readable.
+
+•	Finally, I create a CloudFront distribution resource that uses the S3 bucket as an origin. The default cache behavior is set up with specific allowed and cached methods, a viewer protocol policy, and TTL values. I also set up aliases for the CloudFront distribution 
