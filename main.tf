@@ -1,6 +1,6 @@
 # Define provider
 provider "aws" {
-  region = "us-east-1"
+  region = var.region
 }
 
 # Create VPC
@@ -13,21 +13,23 @@ resource "aws_vpc" "main" {
 
 # Create subnets
 resource "aws_subnet" "public" {
+  count = length(var.public_subnet_cidr_blocks)
   vpc_id = aws_vpc.main.id
-  cidr_block = "10.0.1.0/24"
-  availability_zone = "us-east-1a"
+  cidr_block = var.public_subnet_cidr_blocks[count.index]
+  availability_zone = var.public_subnet_availability_zones[count.index]
   map_public_ip_on_launch = true
   tags = {
-    Name = "public"
+    Name = "public-${count.index+1}"
   }
 }
 
 resource "aws_subnet" "private" {
+  count = length(var.private_subnet_cidr_blocks)
   vpc_id = aws_vpc.main.id
-  cidr_block = "10.0.2.0/24"
-  availability_zone = "us-east-1b"
+  cidr_block = var.private_subnet_cidr_blocks[count.index]
+  availability_zone = var.private_subnet_availability_zones[count.index]
   tags = {
-    Name = "private"
+    Name = "private-${count.index+1}"
   }
 }
 
@@ -56,27 +58,53 @@ resource "aws_security_group" "private" {
 
 # Create EC2 instances
 resource "aws_instance" "web" {
-  ami = "ami-0c55b159cbfafe1f0"
-  instance_type = "t2.micro"
-  subnet_id = aws_subnet.public.id
+  ami = var.web_ami
+  instance_type = var.web_instance_type
+  subnet_id = aws_subnet.public[0].id
   security_groups = [aws_security_group.public.id]
-  user_data = <<-EOF
-              #!/bin/bash
-              sudo apt-get update
-              sudo apt-get install -y apache2
-              EOF
+  user_data = var.web_user_data
+
+  # Add launch configuration for the ASG
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  root_block_device {
+    volume_size = 10
+    delete_on_termination = true
+    volume_type = "gp2"
+  }
 }
 
-resource "aws_instance" "app" {
-  ami = "ami-0c55b159cbfafe1f0"
-  instance_type = "t2.micro"
-  subnet_id = aws_subnet.private.id
-  security_groups = [aws_security_group.private.id]
-  user_data = <<-EOF
-              #!/bin/bash
-              sudo apt-get update
-              sudo apt-get install -y docker.io
-              EOF
+# Create launch configuration
+resource "aws_launch_configuration" "web" {
+  name = "web-launch-config"
+  image_id = var.web_ami
+  instance_type = var.web_instance_type
+  security_groups = [aws_security_group.public.id]
+  user_data = var.web_user_data
+  root_block_device {
+    volume_size = 10
+    delete_on_termination = true
+    volume_type = "gp2"
+  }
+}
+
+# Create ASG
+resource "aws_autoscaling_group" "web" {
+  name = "web-asg"
+  launch_configuration = aws_launch_configuration.web.name
+  vpc_zone_identifier = flatten([aws_subnet.public.*.id])
+  min_size = 1
+  max_size = 3
+  desired_capacity = 2
+  health_check_type = "EC2"
+  health_check_grace_period = 300
+
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Create RDS instance
@@ -101,7 +129,7 @@ resource "aws_db_instance" "postgres" {
 # Create ELB
 resource "aws_elb" "main" {
   name = "my-elb"
-  subnets = [aws_subnet.public.id]
+  subnets = aws_subnet.public.*.id
   security_groups = [aws_security_group.public.id]
   listener {
     instance_port = 80
@@ -115,7 +143,7 @@ resource "aws_elb" "main" {
     timeout = 3
     interval = 30
     target = "HTTP:80/"
-    }
+  }
 }
 
 # Create S3 bucket for static files
@@ -187,3 +215,4 @@ resource "aws_route53_record" "main" {
     evaluate_target_health = true
   }
 }
+
